@@ -9,3 +9,5 @@ pandas
 numpy
 timm
 tokenizers
+wandb
+nltk
