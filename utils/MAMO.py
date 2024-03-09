@@ -31,12 +31,19 @@ def deleteLaterEncodingLayers(model, num_layers_to_keep):  # must pass in the fu
     return copyOfModel
 
 class MAMO_mixer(torch.nn.Module):
-    def __init__(self, base_bert, n_layers = 2, n_visual_tokens = 197, vision_embedding_dim = 384, emb_dims = 512):
+    def __init__(self, base_bert,
+                 n_layers = 2,
+                 n_visual_tokens = 196,
+                 vision_embedding_dim = 384,
+                 emb_dims = 512,
+                 cls_token_id = 101):
         # prepare decoder
         super().__init__()
+        self.cls_token_id = cls_token_id
+        self.embedding_module = base_bert.embeddings
         self.n_visual_tokens = n_visual_tokens
         self.vision_emb_dim = vision_embedding_dim
-        self.base_model = deleteLaterEncodingLayers(base_bert.base_model, n_layers).encoder
+        self.base_model = deleteLaterEncodingLayers(base_bert, n_layers).encoder
         
         self.pooler = torch.nn.AdaptiveAvgPool1d(1)
         self.emb_dimension = emb_dims
@@ -51,14 +58,19 @@ class MAMO_mixer(torch.nn.Module):
         # assert len(vision_embedding) == len(text_embedding)
         n_batch = len(vision_embedding)
         
+        cls_emb = self.embedding_module(torch.tensor([[self.cls_token_id]]*n_batch, 
+                                                     device = vision_embedding.device),
+                                        torch.tensor([[1]]*n_batch,
+                                                     device = vision_embedding.device))
+        
         # normalize dimensions
-        new_vision_emb = self.dimension_caster(vision_embedding)
+        new_vision_emb = self.dimension_caster(vision_embedding[:, 1:, :])   # remove cls token here
         
         # concatenate
-        concatenated_emb = torch.cat([new_vision_emb, text_embedding], dim = 1)
+        concatenated_emb = torch.cat([cls_emb, new_vision_emb, text_embedding], dim = 1)
         
         # create attention mask
-        vision_attention_mask = torch.ones(n_batch, self.n_visual_tokens).to(text_attn_mask.device)
+        vision_attention_mask = torch.ones(n_batch, self.n_visual_tokens + 1).to(text_attn_mask.device) # add a cls token here
         attn_mask = torch.cat([vision_attention_mask, text_attn_mask], dim = 1)
         
         attn_mask = attn_mask[:, None, None, :]
@@ -75,12 +87,18 @@ class MAMO(torch.nn.Module):
                  bert_emb_dim = 512,
                  bert_layers = 2,
                  vocab_size = 30522,
-                 mask_token_id = 103):
+                 mask_token_id = 103,
+                 cls_token_id = 101):
        super().__init__()
        self.vit = vit
        self.bert = bert.base_model
        self.bert = deleteEncodingLayers(self.bert.base_model, bert_layers)
-       self.mamo = MAMO_mixer(bert, bert_layers, 197, vit_emb_dim)
+       self.mamo = MAMO_mixer(bert.base_model,
+                              n_layers = bert_layers,
+                              n_visual_tokens=vit_num_patches,
+                              vision_embedding_dim=vit_emb_dim,
+                              emb_dims = bert_emb_dim,
+                              cls_token_id = cls_token_id)
        
        # vit patches data
        self.vit_num_patches = vit_num_patches

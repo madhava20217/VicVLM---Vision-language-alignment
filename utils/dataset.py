@@ -4,7 +4,9 @@ from PIL import Image
 import re
 from torch.utils.data import Dataset
 import random
-
+import math
+import numpy as np
+import torch
 # taken from albef
 
 def pre_caption(caption,max_words):
@@ -97,15 +99,72 @@ class re_eval_dataset(Dataset):
 
         return image, index
       
+
+class TextMaskGenerator:
+    def __init__(self, masking_ratio = 0.25, mask_token = '[MASK]'):
+        self.masking_ratio = masking_ratio
+        self.mask_token = mask_token
         
+    def __call__(self, text):
+        text = np.array(text.split())  # tokenized
+        len_txt = len(text)
+        
+        n_to_mask = math.ceil(len_txt * self.masking_ratio)
+        rankings = np.random.randn(len_txt)
+        
+        indices = np.argpartition(rankings, -n_to_mask)[-n_to_mask:]
+        text[indices] = self.mask_token
+        return " ".join(text)
+    
+class MaskGenerator:
+    def __init__(self, input_size=192, mask_patch_size=32, model_patch_size=4, mask_ratio=0.6):
+        self.input_size = input_size
+        self.mask_patch_size = mask_patch_size
+        self.model_patch_size = model_patch_size
+        self.mask_ratio = mask_ratio
+        
+        assert self.input_size % self.mask_patch_size == 0
+        assert self.mask_patch_size % self.model_patch_size == 0
+        
+        self.rand_size = self.input_size // self.mask_patch_size
+        self.scale = self.mask_patch_size // self.model_patch_size
+        
+        self.token_count = self.rand_size ** 2
+        self.mask_count = int(np.ceil(self.token_count * self.mask_ratio))
+        
+    def __call__(self):
+        mask_idx = np.random.permutation(self.token_count)[:self.mask_count]
+        mask = np.zeros(self.token_count, dtype=int)
+        mask[mask_idx] = 1
+        
+        mask = mask.reshape((self.rand_size, self.rand_size))
+        mask = mask.repeat(self.scale, axis=0).repeat(self.scale, axis=1)
+        
+        return mask
+
+
 
 class pretrain_dataset(Dataset):
-    def __init__(self, ann_file, transform, max_words=30):        
+    def __init__(self, ann_file, transform, max_words=30,
+                 tokenizer = None,
+                 input_size = 224,
+                 mask_patch_size = 32,
+                 model_patch_size = 16,
+                 masking_ratio = 0.75,
+                 txt_masking_ratio = 0.25,
+                 mask_token = '[MASK]',
+                 mask_token_id = 103,
+                 max_length = 35):        
         self.ann = []
         for f in ann_file:
             self.ann += json.load(open(f,'r'))
         self.transform = transform
         self.max_words = max_words
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.mask_token_id = mask_token_id
+        self.txt_masker = TextMaskGenerator(txt_masking_ratio, mask_token)
+        self.img_masker = MaskGenerator(input_size,mask_patch_size,model_patch_size,masking_ratio)
         
         
     def __len__(self):
@@ -120,9 +179,24 @@ class pretrain_dataset(Dataset):
             caption = pre_caption(random.choice(ann['caption']), self.max_words)
         else:
             caption = pre_caption(ann['caption'], self.max_words)
+            
+        mask_caption = self.txt_masker(caption)
+        
+        tok_masked_txt = self.tokenizer(mask_caption, truncation = True, padding = 'max_length', max_length = self.max_length, return_token_type_ids=False)
+        txt = self.tokenizer(caption, truncation = True,padding = 'max_length', max_length = self.max_length, return_token_type_ids = False)
+        
+        toks, attn_mask = txt['input_ids'], txt['attention_mask']
+        masked_toks, masked_attn_mask = tok_masked_txt['input_ids'], tok_masked_txt['attention_mask']
+        
+        toks, attn_mask, masked_toks, masked_attn_mask = torch.tensor(toks), torch.tensor(attn_mask), torch.tensor(masked_toks), torch.tensor(masked_attn_mask)
+        
+        # masked indices
+        mask_indices = (masked_toks == self.mask_token_id)
       
         image = Image.open(ann['image']).convert('RGB')   
         image = self.transform(image)
+        
+        img_mask = self.img_masker()
                 
-        return image, caption
+        return image, img_mask, toks, attn_mask, masked_toks, masked_attn_mask, mask_indices
             

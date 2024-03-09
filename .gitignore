@@ -1,2 +1,7 @@
 wandb/*
 Models/*
+flickr30k-images/*
+train2014/*
+val2014/*
+Jsons/*
+utils/__pycache__/*
