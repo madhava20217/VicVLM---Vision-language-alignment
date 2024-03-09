@@ -1,0 +1,15 @@
+torch
+torchvision
+torchaudio
+torchtext
+transformers
+tqdm
+torchinfo
+pandas
+numpy
+timm
+tokenizers
+wandb
+nltk
+opencv-python
+opencv-python-contrib
