@@ -149,7 +149,18 @@ class MAMO(torch.nn.Module):
                 masked_image = None,
                 masked_text = None,
                 image_text_matching = False,
+                retrieval = False,
                 ):
+        
+        if retrieval is True:
+            img_rep = torch.nn.functional.normalize(self.vit(image)['last_hidden_state'], 2, dim = 2)
+            txt_rep = torch.nn.functional.normalize(self.bert(text, attn_mask)['last_hidden_state'], 2, dim = 2)
+            joint_rep = self.mamo(img_rep, txt_rep, attn_mask)['last_hidden_state']
+            
+            
+            img_rep = self.img_proj(self.pooler(img_rep.transpose(1,2)))
+            txt_rep = self.txt_proj(self.pooler(txt_rep.transpose(1,2)))
+            return img_rep, txt_rep, joint_rep, self.itm__head(joint_rep[:, 0, :])
         
         if image_text_matching == True:
             img_rep = torch.nn.functional.normalize(self.vit(image)['last_hidden_state'], 2, dim = 2)
