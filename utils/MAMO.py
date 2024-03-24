@@ -153,8 +153,8 @@ class MAMO(torch.nn.Module):
                 ):
         
         if retrieval is True:
-            img_rep = torch.nn.functional.normalize(self.vit(image)['last_hidden_state'], 2, dim = 2)
-            txt_rep = torch.nn.functional.normalize(self.bert(text, attn_mask)['last_hidden_state'], 2, dim = 2)
+            img_rep = self.vit(image)['last_hidden_state']
+            txt_rep = self.bert(text, attn_mask)['last_hidden_state']
             joint_rep = self.mamo(img_rep, txt_rep, attn_mask)['last_hidden_state']
             
             
@@ -163,19 +163,19 @@ class MAMO(torch.nn.Module):
             return img_rep, txt_rep, joint_rep, self.itm__head(joint_rep[:, 0, :])
         
         if image_text_matching == True:
-            img_rep = torch.nn.functional.normalize(self.vit(image)['last_hidden_state'], 2, dim = 2)
-            txt_rep = torch.nn.functional.normalize(self.bert(text, attn_mask)['last_hidden_state'], 2, dim = 2)
+            img_rep = self.vit(image)['last_hidden_state']
+            txt_rep = self.bert(text, attn_mask)['last_hidden_state']
             joint_rep = self.mamo(img_rep, txt_rep, attn_mask)['last_hidden_state']
             
             return img_rep, txt_rep, joint_rep, self.itm__head(joint_rep[:, 0, :])
         
         else:
             # return mask_img-clean_txt, clean_img,-mask_txt, 
-            img_rep = torch.nn.functional.normalize(self.vit(image)['last_hidden_state'] , 2, dim = 2)             # clean image
-            txt_rep = torch.nn.functional.normalize(self.bert(text, attn_mask)['last_hidden_state'], 2, dim = 2)   # clean text
+            img_rep = self.vit(image)['last_hidden_state']              # clean image
+            txt_rep = self.bert(text, attn_mask)['last_hidden_state']   # clean text
             
-            mask_img_rep = torch.nn.functional.normalize(self.vit(masked_image)['last_hidden_state'], 2, dim = 2)
-            mask_txt_rep = torch.nn.functional.normalize(self.bert(masked_text, attn_mask)['last_hidden_state'], 2, dim = 2)
+            mask_img_rep = self.vit(masked_image)['last_hidden_state']
+            mask_txt_rep = self.bert(masked_text, attn_mask)['last_hidden_state']
             
             # multimodal prediction
             c_img_m_txt = self.mamo(img_rep, mask_txt_rep, attn_mask)['last_hidden_state']
@@ -222,14 +222,16 @@ class MAMO(torch.nn.Module):
     
     
     def get_itc_loss(self, img_feats, txt_feats):
-        # Calculate cosine similarity
+        # Calculate similarity
+        img_feats = torch.nn.functional.normalize(img_feats, 2, dim = -1)
+        txt_feats = torch.nn.functional.normalize(img_feats, 2, dim = -1)
         sim = torch.exp((img_feats@txt_feats.T)/self.tau)
         self_mask = torch.eye(sim.shape[0], device=sim.device)
 
         return sim, (torch.nn.functional.cross_entropy(sim, self_mask) + torch.nn.functional.cross_entropy(sim.T, self_mask))/2.
     
     def get_samples(self, similarities):
-        probs = torch.nn.functional.softmax(similarities, dim = 1)
+        probs = torch.nn.functional.softmax(1/similarities, dim = 1)
         txt_indices = torch.multinomial(probs, num_samples=1, replacement=True).squeeze(1)
         img_indices = torch.multinomial(probs.T, num_samples=1, replacement=True).squeeze(1)
         
