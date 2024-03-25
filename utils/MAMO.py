@@ -88,7 +88,8 @@ class MAMO(torch.nn.Module):
                  bert_layers = 2,
                  vocab_size = 30522,
                  mask_token_id = 103,
-                 cls_token_id = 101):
+                 cls_token_id = 101,
+                 tau = None):
        super().__init__()
        self.vit = vit
        self.bert = bert.base_model
@@ -109,7 +110,10 @@ class MAMO(torch.nn.Module):
        self.mask_token_id = mask_token_id
        
        # learnable temperature parameter
-       self.tau = torch.nn.Parameter(torch.Tensor([1.]))#torch.FloatTensor(1).uniform_(2, 5))       # uniform in range 1 to 5
+       self.tau = torch.nn.Parameter(torch.FloatTensor([0.07]))      # uniform in range 1 to 5
+       if tau is not None:
+           self.tau = torch.nn.Parameter(torch.FloatTensor([tau]))      # uniform in range 1 to 5
+       
        self.tau.requires_grad = True
 
        # joint representation
@@ -158,8 +162,8 @@ class MAMO(torch.nn.Module):
             joint_rep = self.mamo(img_rep, txt_rep, attn_mask)['last_hidden_state']
             
             
-            img_rep = self.img_proj(self.pooler(img_rep.transpose(1,2)))
-            txt_rep = self.txt_proj(self.pooler(txt_rep.transpose(1,2)))
+            # img_rep = self.img_proj(self.pooler(img_rep.transpose(1,2)))
+            # txt_rep = self.txt_proj(self.pooler(txt_rep.transpose(1,2)))
             return img_rep, txt_rep, joint_rep, self.itm__head(joint_rep[:, 0, :])
         
         if image_text_matching == True:
@@ -184,15 +188,15 @@ class MAMO(torch.nn.Module):
             # pure txt
             txt_prediction = self.mlm_head(mask_txt_rep)
             
-            # pool and flatten text and visual features obtained before fusion
-            img_rep = self.img_proj(self.pooler(img_rep.transpose(1,2)))
-            txt_rep = self.txt_proj(self.pooler(txt_rep.transpose(1,2)))
-            return (c_img_m_txt, m_img_c_txt, mask_img_rep, txt_prediction, img_rep, txt_rep)
+            # pure mamo
+            img_txt_joint = self.mamo(img_rep, txt_rep, attn_mask)['last_hidden_state']
+        
+            return (c_img_m_txt, m_img_c_txt, img_txt_joint, mask_img_rep, txt_prediction, img_rep, txt_rep)
     
     def get_mrm_loss(self, online_representation, target_representation, mask):
         # remove cls token
-        on_rep = self.mrm_proj(online_representation[:, 1:, :])
-        tr_rep = self.mrm_proj(target_representation[:, 1:, :])
+        on_rep = torch.nn.functional.normalize(self.mrm_proj(online_representation[:, 1:, :]), dim = -1)
+        tr_rep = torch.nn.functional.normalize(self.mrm_proj(target_representation[:, 1:, :]), dim = -1)
 
         
         loss = torch.nn.functional.mse_loss(on_rep, tr_rep, reduction = 'none')
@@ -204,8 +208,8 @@ class MAMO(torch.nn.Module):
         tr_rep = target_representation[:, 1:self.vit_num_patches+1, :]
         
         # # normalize
-        # on_rep = torch.nn.functional.normalize(on_rep, dim = 2)
-        # tr_rep = torch.nn.functional.normalize(tr_rep, dim = 2)
+        on_rep = torch.nn.functional.normalize(on_rep, dim = 2)
+        tr_rep = torch.nn.functional.normalize(tr_rep, dim = 2)
         
         loss = torch.nn.functional.l1_loss(on_rep, tr_rep, reduction = 'none')
         if mask.ndim == 2:
@@ -223,15 +227,26 @@ class MAMO(torch.nn.Module):
     
     def get_itc_loss(self, img_feats, txt_feats):
         # Calculate similarity
-        img_feats = torch.nn.functional.normalize(img_feats, 2, dim = -1)
-        txt_feats = torch.nn.functional.normalize(img_feats, 2, dim = -1)
-        sim = torch.exp((img_feats@txt_feats.T)/self.tau)
-        self_mask = torch.eye(sim.shape[0], device=sim.device)
+        with torch.no_grad():
+            self.tau.clamp_(0.001,0.5)
 
-        return sim, (torch.nn.functional.cross_entropy(sim, self_mask) + torch.nn.functional.cross_entropy(sim.T, self_mask))/2.
+        # pool and flatten text and visual features obtained before fusion
+        img_feats = self.img_proj(self.pooler(img_feats.transpose(1,2)))
+        txt_feats = self.txt_proj(self.pooler(txt_feats.transpose(1,2)))
+        
+        
+        sim = (img_feats@txt_feats.T)/self.tau
+        # sim = torch.clip(sim, max = 1e4, min = 1e-4)
+        self_mask = torch.eye(sim.shape[0], device=sim.device)
+        
+        loss_i2t = -torch.sum(torch.nn.functional.log_softmax(sim, dim = 1)*self_mask, dim = 1).mean()
+        loss_t2i = -torch.sum(torch.nn.functional.log_softmax(sim.T, dim = 1)*self_mask, dim = 1).mean()
+
+        return sim, (loss_i2t+loss_t2i)/2.0
     
     def get_samples(self, similarities):
-        probs = torch.nn.functional.softmax(1/similarities, dim = 1)
+        probs = torch.nn.functional.softmax(similarities, dim = 1)
+        probs = probs.fill_diagonal_(0)         # eliminate full samples
         txt_indices = torch.multinomial(probs, num_samples=1, replacement=True).squeeze(1)
         img_indices = torch.multinomial(probs.T, num_samples=1, replacement=True).squeeze(1)
         
