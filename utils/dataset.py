@@ -7,6 +7,7 @@ import random
 import math
 import numpy as np
 import torch
+import cv2
 # taken from albef
 
 def pre_caption(caption,max_words):
@@ -200,3 +201,60 @@ class pretrain_dataset(Dataset):
                 
         return image, img_mask, toks, attn_mask, masked_toks, masked_attn_mask, mask_indices
             
+            
+class pretrain_dataset_regvlm(Dataset):
+    # TODO extension: wSimMIM
+    def __init__(self, ann_file, transform, max_words=30,
+                 tokenizer = None,
+                 input_size = 224,
+                 mask_patch_size = 32,
+                 model_patch_size = 16,
+                 masking_ratio = 0.75,
+                 txt_masking_ratio = 0.25,
+                 mask_token = '[MASK]',
+                 mask_token_id = 103,
+                 max_length = 35):        
+        self.ann = []
+        for f in ann_file:
+            self.ann += json.load(open(f,'r'))
+        self.transform = transform
+        self.max_words = max_words
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.mask_token_id = mask_token_id
+        self.txt_masker = TextMaskGenerator(txt_masking_ratio, mask_token)
+        self.img_masker = MaskGenerator(input_size,mask_patch_size,model_patch_size,masking_ratio)
+        
+        
+    def __len__(self):
+        return len(self.ann)
+    
+
+    def __getitem__(self, index):    
+        
+        ann = self.ann[index]
+        
+        if type(ann['caption']) == list:
+            caption = pre_caption(random.choice(ann['caption']), self.max_words)
+        else:
+            caption = pre_caption(ann['caption'], self.max_words)
+            
+        mask_caption = self.txt_masker(caption)
+        
+        tok_masked_txt = self.tokenizer(mask_caption, truncation = True, padding = 'max_length', max_length = self.max_length, return_token_type_ids=False)
+        txt = self.tokenizer(caption, truncation = True,padding = 'max_length', max_length = self.max_length, return_token_type_ids = False)
+        
+        toks, attn_mask = txt['input_ids'], txt['attention_mask']
+        masked_toks, masked_attn_mask = tok_masked_txt['input_ids'], tok_masked_txt['attention_mask']
+        
+        toks, attn_mask, masked_toks, masked_attn_mask = torch.tensor(toks), torch.tensor(attn_mask), torch.tensor(masked_toks), torch.tensor(masked_attn_mask)
+        
+        # masked indices
+        mask_indices = (masked_toks == self.mask_token_id)
+      
+        image = Image.open(ann['image']).convert('RGB')   
+        image = self.transform(image)
+        
+        img_mask = self.img_masker()
+                
+        return image, img_mask, toks, attn_mask, masked_toks, masked_attn_mask, mask_indices
