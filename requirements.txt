@@ -11,3 +11,5 @@ timm
 tokenizers
 wandb
 nltk
+opencv-python
+opencv-python-contrib
