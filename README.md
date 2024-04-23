@@ -1,3 +1,19 @@
+
+
+## How to run (pretraining training and benchmarks)
+- Fetch code from repo
+- Fetch Flickr30k dataset
+- Run respective `pretrain_*` script
+  
+## Run retrieval and fetching
+-  "https://drive.google.com/drive/u/0/folders/1t-_7XrazX1xXd1L7CWIlgygqKW6UnmEu"
+-  Load model from gdrive or train your own
+-  Run `retrieval_*.py` to get retrieval results
+  
+Note: we do not provide a frontend webapp for retrieval, you can use the code to get the results and use them in your own frontend.
+
+# Summary of our impl
+
 init: I, T
 get:
 - I', T : image patches masked
@@ -34,3 +50,4 @@ Note: MRM is effective empirically, self distillation may collapse. Introduce tw
 5. Image text matching
 - similarity probability in ITC to sample an in-batch hard negative example for each image and each text. Then use CLS token from multimodal fusion encoder's output to predict whether image-text pair is matched.
 - determine whether image text pair is matched using 
+
