@@ -1,0 +1,8 @@
+wandb/*
+Models/*
+flickr30k-images/*
+train2014/*
+val2014/*
+Jsons/*
+Finetuning/*
+utils/__pycache__/*
