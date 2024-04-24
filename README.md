@@ -12,42 +12,29 @@
   
 Note: we do not provide a frontend webapp for retrieval, you can use the code to get the results and use them in your own frontend.
 
-# Summary of our impl
+# VicVLM implementation
 
-init: I, T
-get:
-- I', T : image patches masked
-- I, T' : text patches masked
+Given an image, text pair (I, T), create masked image I', and masked text T'. Initialize a target network with weights equal to the online network's vision encoder. Freeze the target network's weights and update it as an exponentially weighted moving average of the online network's vision encoder. Generate a target representation $R_{i}^t$ of the image I from the target network.
 
-multimodal representation f(theta)(I', T), f(theta)(I, T')
-network: theta
+1. Masked Image modeling: given image I', obtain representation $R_i^o$ from vision encoder of the online network. Take L2 loss between this and the masked positions of $R_{i}^t$.
+2. Joint Masked Image Modeling: given image I', obtain representation $R_{i-joint}^o$ from multimodal encoder. Take L2 loss between this and the masked positions of $R_{i}^t$.
+3. Masked Language Modeling: given text T', predict missing words from representation $R_t^o$ obtained from the text encoder of the online network.
+4. VICReg:
+    - Variance maximization: 
+    $$
+    \begin{align} v(Z) &= \frac{1}{d}\Sigma_{j = 1}^d max(0, 1 - S(z^j, \epsilon))\\
+    S(x, \epsilon) &= \sqrt{Var(Z_j, \epsilon)}
+    \end{align}
+    $$
+    where $d$ is the number of dimensions in the representation and $S(x, \epsilon)$ is the regularized standard deviation.
+    - Covariance minimization:
+    $$
+    \begin{align}
+    C(Z) = \frac{1}{d} \Sigma_{i \ne j} (Cov(Z_{i,j})^2)
+    \end{align}
+    $$
+    - Invariance: given two sets of features F and F', minimize $\frac{1}{n}\Sigma_{i = 1}^n(F_i - F_i')^2$.
 
-1. masked representation modeling
-- target network: theta_avg
-- theta_avg = alpha*theta_avg + (1-alpha)theta [Exponentially weighted moving average]
-- no gradient propagation
-
-- send (I, T) into target network, get latent multimodal representation f(theta_avg)(I, T)
-- f(theta_avg)(I, T) serves as prediction targets for for f(theta)(I', T) after passing through a nonlinear projector g.
-- Minimiise L2 loss on each masked position.
-
-
-Note: MRM is effective empirically, self distillation may collapse. Introduce two explicit prediction targets for vision and language.
-
-2. Masked image modeling:
-- uses masked image with the help of text
-- uses momentum visual features extracted by target network's image encoder : f(theta_avg)_visual
-- calculates l1 loss between MLP predictor on joint multimodal representation of trainee network after passing thru an MLP and target network visual representations.
-
-3. Masked language modeling:
-- uses masked text only, no vision since semantically rich
-- use word tokens as the explicit target.
-- uses crossentropy loss between word prediction probability and ground truth on each masked text position.
-
-4. global text image alignment (Image-text contrastive learning)
-- info nce
-
-5. Image text matching
-- similarity probability in ITC to sample an in-batch hard negative example for each image and each text. Then use CLS token from multimodal fusion encoder's output to predict whether image-text pair is matched.
-- determine whether image text pair is matched using 
-
+    We performed variance maximization and covariance minimization on features of (I, T), (I', T), (I, T') obtained from the multimodal encoder. Invariance was taken between (I, T) and (I', T), and (I, T) and (I, T').
+4. Image-text contrastive learning: Minimize the InfoNCE loss between all possible image-text pairs.
+5. Image text matching: given an image-text pair, determine the probability that they correspond to each other.
