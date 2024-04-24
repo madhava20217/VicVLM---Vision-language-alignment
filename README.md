@@ -1,4 +1,30 @@
+# README
 
+VicVLM is a novel algorithm for vision-text alignment that builds upon MAMO (Zhao et al.), MaskVLM (Kwon et al.) and VICReg (Bardes et al.). It aims to be computationally more efficient while providing performance exceeding or on par with MAMO.
+
+## Benchmarks
+
+Pretraining, training and testing happened on Flickr30k. The reported results are for the testing split of Flickr30k.
+
+A ViT-S model was used as the image encoder and a BERT-S was used as the text encoder. 
+
+VicVLM performs close to MAMO in Image Retrieval
+
+### Image Retrieval
+
+| Algorithm                  | R@1       | R@5      | R@10      |
+|----------------------------|-----------|----------|-----------|
+| MAMO                       | **55.56** | 79.14    | **84.94** |
+| VicVLM (pixel pred).       | 47.96     | 74.84    | 82.42     |
+| VicVLM (BYOL latent pred.) | 55.5      | **79.2** | 84.92     |
+
+### Text Retrieval
+
+| Algorithm                  | R@1      | R@5      | R@10     |
+|----------------------------|----------|----------|----------|
+| MAMO                       | 67.8     | 88.1     | 94.3     |
+| VicVLM (pixel pred).       | 63.4     | 85.6     | 90.0     |
+| VicVLM (BYOL latent pred.) | **72.3** | **92.3** | **95.4** |
 
 ## How to run (pretraining training and benchmarks)
 - Fetch code from repo
